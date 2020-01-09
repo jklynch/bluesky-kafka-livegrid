@@ -38,6 +38,8 @@ def livegrid_server():
 
     dispatcher.subscribe(func=manager)
 
+    dispatcher.start()
+
 
 if __name__ == "__main__":
     livegrid_server()
