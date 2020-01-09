@@ -1,0 +1,2 @@
+include versioneer.py
+include bluesky_kafka_livegrid/_version.py
