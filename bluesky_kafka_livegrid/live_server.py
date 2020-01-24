@@ -1,7 +1,5 @@
 from bluesky_kafka.kafka import RemoteDispatcher
 
-from bluesky_kafka_livegrid.livegrid_manager import LiveGridManager
-
 
 def live_server(manager, topics, bootstrap_servers, group_id):
     dispatcher = RemoteDispatcher(
