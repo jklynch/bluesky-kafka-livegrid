@@ -1,1 +1,6 @@
+bluesky
 bluesky-kafka
+databroker
+matplotlib
+numpy
+scikit-learn
