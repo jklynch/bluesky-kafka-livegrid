@@ -19,6 +19,8 @@ class DiffractionClusteringManager:
         self.start_uid_to_sample_name = dict()
         self.sample_name_to_start_uids = defaultdict(list)
         self.sample_name_to_data = dict()
+        self.sample_name_to_total = dict()
+        self.sample_name_to_n_sums = dict()
         self.sample_name_to_figure = dict()
 
         self.data_broker = Broker.named("pdf")
@@ -27,68 +29,73 @@ class DiffractionClusteringManager:
         if name == "start":
             start_uid = doc["uid"]
             print(f"got a start document with uid {doc['uid']}")
+            #pprint.pprint(doc)
+            if "sample_name" not in doc:
+                print("no sample name")
+                return
             sample_name = doc['sample_name']
             print(f"  sample_name is {sample_name}")
             self.sample_name_to_start_uids[sample_name].append(start_uid)
             self.start_uid_to_sample_name[start_uid] = sample_name
-            #pprint.pprint(doc)
             # do we already have this sample_name?
             if sample_name in self.sample_name_to_data:
                 print(f"  we have {sample_name}")
             else:
                 print(f"  adding {sample_name}")
                 self.sample_name_to_data[sample_name] = list()
+                self.sample_name_to_total[sample_name] = np.zeros((2048, 2048))
+                self.sample_name_to_n_sums[sample_name] = np.zeros((1000, 2)) #TODO: don't use 1000
                 f, ax = plt.subplots()
                 self.sample_name_to_figure[sample_name] = (f, ax)
-            #run_start_uid = doc["uid"]
-            #self.live_grids[run_start_uid] = LiveGrid(raster_shape=(10, 10), I="det")
-            #self.live_grids[run_start_uid].start(doc)
         elif name == "descriptor":
             pass
-            #print("descriptor:")
-            #pprint.pprint(doc)
-            #self.descriptor_uid_to_run_uid[doc["uid"]] = doc["run_start"]
         elif name == "event":
             pass
-            #print("event:")
-            #pprint.pprint(doc)
-            #run_uid = self.descriptor_uid_to_run_uid[doc["descriptor"]]
-            #livegrid = self.live_grids[run_uid]
-            #livegrid.event(doc)
         elif name == "stop":
             print("stop:")
             pprint.pprint(doc)
             # hoping the data is all in databroker now
             # get the data!
             start_uid = doc["run_start"]
+            if start_uid not in self.start_uid_to_sample_name:
+                print(f"did not see the run start for {start_uid}")
+                return
             sample_name = self.start_uid_to_sample_name[start_uid]
-            print(f"  sample_name: {sample_name}")
+            print(f"** sample_name: {sample_name}")
             sample_name_uids = self.sample_name_to_start_uids[sample_name]
-            print(f"  sample_name_uids:\n{sample_name_uids}")
+            print(f"** sample_name_uids:\n{sample_name_uids}")
             sample_count = len(sample_name_uids)
+            sample_scan = list(self.data_broker(start_uid))[0]
+            diffraction_image = next(sample_scan.data("pe1c_image"))
+            print(f"** image shape {diffraction_image.shape}")
+            sample_pixel_count = np.product(diffraction_image.shape)
+            print(f"** image pixel count {sample_pixel_count}")
+            n_diffraction_image = diffraction_image / np.sum(diffraction_image)
+            self.sample_name_to_total[sample_name] += n_diffraction_image
+            avg_sample_image = self.sample_name_to_total[sample_name] / sample_count
+            self.sample_name_to_n_sums[sample_name][sample_count - 1, 1] = (
+                np.sum(n_diffraction_image - avg_sample_image)
+            )
+            
+
             if sample_count < 2:
                 print(f"not enough samples for {sample_name} yet")
             else:
-                sample_pixel_count = 2048*2048   # TODO: get this right
-                sample_data_for_clustering = np.zeros((sample_count, sample_pixel_count))
-                for sample_i, sample_scan_uid in enumerate(sample_name_uids):
-                    # expect diffraction data to be a 2-dimensional array
-                    sample_scan = list(self.data_broker(sample_scan_uid))[0]
-                    #print(sample_scan.table())
-                    # only one image in "pe1c_image"?
-                    diffraction_data = next(sample_scan.data("pe1c_image"))
-                    sample_data_for_clustering[sample_i, :] = diffraction_data.reshape((-1, ))
-                pca = PCA(n_components=min(sample_count, 5))
-                pca.fit(sample_data_for_clustering)
-                print(f"explained variance: {pca.explained_variance_ratio_}")
-                print(f"singular values: {pca.singular_values_}")
+                print(self.sample_name_to_n_sums[sample_name][:sample_count, 1])            
+                sample_max = np.max(np.abs(self.sample_name_to_n_sums[sample_name][:sample_count, 1]))
+                print(f"sample_max: {sample_max}")
+                n_n_sums = self.sample_name_to_n_sums[sample_name][:sample_count, :] / sample_max 
+                print(f"normalized sums: {n_n_sums}")
+                
                 dbscan_clusters = DBSCAN(
-                    eps=0.5,
+                    eps=0.05,
                     min_samples=2
                 ).fit(
-                    sample_data_for_clustering - pca.components_[0]
+                    # scikit-learn told me to do this reshape
+                    n_n_sums
                 )
                 cluster_label_set = set(dbscan_clusters.labels_)
+                print(f"cluster labels: {dbscan_clusters.labels_}")
                 print(f"\n*** DBSCAN finds {len(cluster_label_set)} cluster(s)\n")
                 sample_figure, sample_ax = self.sample_name_to_figure[sample_name]
 
@@ -106,7 +113,6 @@ class DiffractionClusteringManager:
                 sample_ax.set_title(sample_name)
                 sample_figure.savefig(fname=sample_name, format="pdf")
 
-            #list(db[-1].events(fill=True))[0][‘data’][‘pe1c_image’]
         else:
             print(name)
 
