@@ -2,5 +2,6 @@ bluesky
 bluesky-kafka
 databroker
 matplotlib
+msgpack
 numpy
 scikit-learn
